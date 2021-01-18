@@ -1,2 +1,3 @@
 # squarepine_javascript
-A custom, JUCE-based, Javascript parser.
+
+A JUCE-based Javascript interpreter based on the original `juce::JavascriptEngine`.
