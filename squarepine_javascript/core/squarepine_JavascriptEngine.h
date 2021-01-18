@@ -1,5 +1,3 @@
-class RootObject;
-
 /** A simple Javascript interpreter.
 
     Create an instance of this class and call execute() to run your Javascript code.
