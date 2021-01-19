@@ -29,6 +29,7 @@
 
 namespace TokenTypes
 {
+    #undef SP_DECLARE_JS_TOKEN
     #define SP_DECLARE_JS_TOKEN(name, str) \
         static const char* const name = str;
 
@@ -57,7 +58,14 @@ bool isFunction (const var& v) noexcept;
 
 static bool areTypeEqual (const var& a, const var& b)
 {
-    return a.hasSameTypeAs (b) && isFunction (a) == isFunction (b)
+    if (auto* ado = dynamic_cast<JavascriptClass*> (a.getDynamicObject()))
+        return ado->areSameValue (b);
+
+    if (auto* bdo = dynamic_cast<JavascriptClass*> (b.getDynamicObject()))
+        return bdo->areSameValue (a);
+
+    return a.hasSameTypeAs (b)
+        && isFunction (a) == isFunction (b)
         && (((a.isUndefined() || a.isVoid()) && (b.isUndefined() || b.isVoid())) || a == b);
 }
 
@@ -252,7 +260,7 @@ struct Statement
     Statement (const CodeLocation& l) noexcept : location (l) {}
     virtual ~Statement() {}
 
-    enum ResultCode
+    enum class ResultCode
     {
         ok = 0,
         returnWasHit,
@@ -260,7 +268,7 @@ struct Statement
         continueWasHit
     };
 
-    virtual ResultCode perform (const Scope&, var*) const  { return ok; }
+    virtual ResultCode perform (const Scope&, var*) const  { return ResultCode::ok; }
 
     CodeLocation location;
 
@@ -275,7 +283,7 @@ struct Expression : public Statement
 
     virtual var getResult (const Scope&) const                  { return var::undefined(); }
     virtual void assign (const Scope&, const var&) const        { location.throwError ("Cannot assign to this expression!"); }
-    ResultCode perform (const Scope& s, var*) const override    { getResult (s); return ok; }
+    ResultCode perform (const Scope& s, var*) const override    { getResult (s); return ResultCode::ok; }
 };
 
 using ExpPtr = std::unique_ptr<Expression>;
@@ -288,10 +296,13 @@ struct BlockStatement final : public Statement
     ResultCode perform (const Scope& s, var* returnedValue) const override
     {
         for (auto* statement : statements)
-            if (auto r = statement->perform (s, returnedValue))
+        {
+            const auto r = statement->perform (s, returnedValue);
+            if (r != ResultCode::ok)
                 return r;
+        }
 
-        return ok;
+        return ResultCode::ok;
     }
 
     OwnedArray<Statement> statements;
@@ -317,7 +328,7 @@ struct VarStatement final : public Statement
     ResultCode perform (const Scope& s, var*) const override
     {
         s.scope->setProperty (name, initialiser->getResult (s));
-        return ok;
+        return ResultCode::ok;
     }
 
     Identifier name;
@@ -337,16 +348,16 @@ struct LoopStatement final : public Statement
             s.checkTimeOut (location);
             auto r = body->perform (s, returnedValue);
 
-            if (r == returnWasHit)   return r;
-            if (r == breakWasHit)    break;
+            if (r == ResultCode::returnWasHit)      return r;
+            else if (r == ResultCode::breakWasHit)  break;
 
             iterator->perform (s, nullptr);
 
-            if (isDoLoop && r != continueWasHit && ! condition->getResult (s))
+            if (isDoLoop && r != ResultCode::continueWasHit && ! condition->getResult (s))
                 break;
         }
 
-        return ok;
+        return ResultCode::ok;
     }
 
     std::unique_ptr<Statement> initialiser, iterator, body;
@@ -361,7 +372,7 @@ struct ReturnStatement final : public Statement
     ResultCode perform (const Scope& s, var* ret) const override
     {
         if (ret != nullptr)  *ret = returnValue->getResult (s);
-        return returnWasHit;
+        return ResultCode::returnWasHit;
     }
 
     ExpPtr returnValue;
@@ -370,13 +381,13 @@ struct ReturnStatement final : public Statement
 struct BreakStatement final : public Statement
 {
     BreakStatement (const CodeLocation& l) noexcept : Statement (l) {}
-    ResultCode perform (const Scope&, var*) const override  { return breakWasHit; }
+    ResultCode perform (const Scope&, var*) const override  { return ResultCode::breakWasHit; }
 };
 
 struct ContinueStatement final : public Statement
 {
     ContinueStatement (const CodeLocation& l) noexcept : Statement (l) {}
-    ResultCode perform (const Scope&, var*) const override  { return continueWasHit; }
+    ResultCode perform (const Scope&, var*) const override  { return ResultCode::continueWasHit; }
 };
 
 struct LiteralValue final : public Expression
@@ -731,11 +742,11 @@ struct FunctionCall : public Expression
     {
         if (auto* dot = dynamic_cast<DotOperator*> (object.get()))
         {
-            auto thisObject = dot->parent->getResult (s);
+            const auto thisObject = dot->parent->getResult (s);
             return invokeFunction (s, s.findFunctionCall (location, thisObject, dot->child), thisObject);
         }
 
-        auto function = object->getResult (s);
+        const auto function = object->getResult (s);
         return invokeFunction (s, function, var (s.scope.get()));
     }
 
@@ -748,25 +759,11 @@ struct FunctionCall : public Expression
 //==============================================================================
 struct NewOperator final : public FunctionCall
 {
-    NewOperator (const CodeLocation& l) noexcept : FunctionCall (l) {}
+    NewOperator (const CodeLocation& l, const Identifier& cID) noexcept : FunctionCall (l), classId (cID) {}
 
-    var getResult (const Scope& s) const override
-    {
-        var classOrFunc = object->getResult (s);
-        const bool isFunc = isFunction (classOrFunc);
+    var getResult (const Scope& s) const override;
 
-        if (! (isFunc || classOrFunc.getDynamicObject() != nullptr))
-            return var::undefined();
-
-        DynamicObject::Ptr newObject (new DynamicObject());
-
-        if (isFunc)
-            invokeFunction (s, classOrFunc, newObject.get());
-        else
-            newObject->setProperty (getPrototypeIdentifier(), classOrFunc);
-
-        return newObject.get();
-    }
+    const Identifier classId;
 };
 
 //==============================================================================
@@ -880,8 +877,8 @@ struct TokenIterator
 private:
     String::CharPointerType p;
 
-    static bool isIdentifierStart (juce_wchar c) noexcept   { return CharacterFunctions::isLetter (c)        || c == '_'; }
-    static bool isIdentifierBody  (juce_wchar c) noexcept   { return CharacterFunctions::isLetterOrDigit (c) || c == '_'; }
+    static bool isIdentifierStart (juce_wchar c) noexcept   { return CharacterFunctions::isLetter (c) || c == '_'; }
+    static bool isIdentifierBody (juce_wchar c) noexcept    { return CharacterFunctions::isLetterOrDigit (c) || c == '_'; }
 
     TokenType matchNextToken()
     {
@@ -1092,16 +1089,16 @@ private:
 //==============================================================================
 struct ExpressionTreeBuilder final : private TokenIterator
 {
-    ExpressionTreeBuilder (const String code)  : TokenIterator (code) {}
+    ExpressionTreeBuilder (const String code) : TokenIterator (code) {}
 
     BlockStatement* parseStatementList()
     {
-        auto b = std::make_unique<BlockStatement> (location);
+        auto* b = new BlockStatement (location);
 
         while (currentType != TokenTypes::closeBrace && currentType != TokenTypes::eof)
             b->statements.add (parseStatement());
 
-        return b.release();
+        return b;
     }
 
     void parseFunctionParamsAndBody (FunctionObject& fo)
@@ -1142,7 +1139,7 @@ struct ExpressionTreeBuilder final : private TokenIterator
 private:
     void throwError (const String& err) const { location.throwError (err); }
 
-    template <typename OpType>
+    template<typename OpType>
     Expression* parseInPlaceOpExpression (ExpPtr& lhs)
     {
         ExpPtr rhs (parseExpression());
@@ -1153,26 +1150,26 @@ private:
     BlockStatement* parseBlock()
     {
         match (TokenTypes::openBrace);
-        std::unique_ptr<BlockStatement> b (parseStatementList());
+        auto* b = parseStatementList();
         match (TokenTypes::closeBrace);
-        return b.release();
+        return b;
     }
 
     Statement* parseStatement()
     {
-        if (currentType == TokenTypes::openBrace)   return parseBlock();
-        if (matchIf (TokenTypes::var))              return parseVar();
-        if (matchIf (TokenTypes::if_))              return parseIf();
-        if (matchIf (TokenTypes::while_))           return parseDoOrWhileLoop (false);
-        if (matchIf (TokenTypes::do_))              return parseDoOrWhileLoop (true);
-        if (matchIf (TokenTypes::for_))             return parseForLoop();
-        if (matchIf (TokenTypes::return_))          return parseReturn();
-        if (matchIf (TokenTypes::break_))           return new BreakStatement (location);
-        if (matchIf (TokenTypes::continue_))        return new ContinueStatement (location);
-        if (matchIf (TokenTypes::function))         return parseFunction();
-        if (matchIf (TokenTypes::semicolon))        return new Statement (location);
-        if (matchIf (TokenTypes::plusplus))         return parsePreIncDec<AdditionOp>();
-        if (matchIf (TokenTypes::minusminus))       return parsePreIncDec<SubtractionOp>();
+        if (currentType == TokenTypes::openBrace)                       return parseBlock();
+        if (matchIf (TokenTypes::var) || matchIf (TokenTypes::let_))    return parseVar();
+        if (matchIf (TokenTypes::if_))                                  return parseIf();
+        if (matchIf (TokenTypes::while_))                               return parseDoOrWhileLoop (false);
+        if (matchIf (TokenTypes::do_))                                  return parseDoOrWhileLoop (true);
+        if (matchIf (TokenTypes::for_))                                 return parseForLoop();
+        if (matchIf (TokenTypes::return_))                              return parseReturn();
+        if (matchIf (TokenTypes::break_))                               return new BreakStatement (location);
+        if (matchIf (TokenTypes::continue_))                            return new ContinueStatement (location);
+        if (matchIf (TokenTypes::function))                             return parseFunction();
+        if (matchIf (TokenTypes::semicolon))                            return new Statement (location);
+        if (matchIf (TokenTypes::plusplus))                             return parsePreIncDec<AdditionOp>();
+        if (matchIf (TokenTypes::minusminus))                           return parsePreIncDec<SubtractionOp>();
 
         if (matchesAny (TokenTypes::openParen, TokenTypes::openBracket))
             return matchEndOfStatement (parseFactor());
@@ -1184,18 +1181,34 @@ private:
         return nullptr;
     }
 
-    Expression* matchEndOfStatement (Expression* ex)  { ExpPtr e (ex); if (currentType != TokenTypes::eof) match (TokenTypes::semicolon); return e.release(); }
-    Expression* matchCloseParen (Expression* ex)      { ExpPtr e (ex); match (TokenTypes::closeParen); return e.release(); }
+    /**
+        @see http://inimino.org/~inimino/blog/javascript_semicolons
+    */
+    Expression* matchEndOfStatement (Expression* ex)
+    {
+        ExpPtr e (ex);
+        if (currentType != TokenTypes::eof)
+            match (TokenTypes::semicolon);
+
+        return e.release();
+    }
+
+    Expression* matchCloseParen (Expression* ex)
+    {
+        ExpPtr e (ex);
+        match (TokenTypes::closeParen);
+        return e.release();
+    }
 
     Statement* parseIf()
     {
-        auto s = std::make_unique<IfStatement> (location);
+        auto* s = new IfStatement (location);
         match (TokenTypes::openParen);
         s->condition.reset (parseExpression());
         match (TokenTypes::closeParen);
         s->trueBranch.reset (parseStatement());
         s->falseBranch.reset (matchIf (TokenTypes::else_) ? parseStatement() : new Statement (location));
-        return s.release();
+        return s;
     }
 
     Statement* parseReturn()
@@ -1210,20 +1223,20 @@ private:
 
     Statement* parseVar()
     {
-        auto s = std::make_unique<VarStatement> (location);
+        auto* s = new VarStatement (location);
         s->name = parseIdentifier();
         s->initialiser.reset (matchIf (TokenTypes::assign) ? parseExpression() : new Expression (location));
 
         if (matchIf (TokenTypes::comma))
         {
-            auto block = std::make_unique<BlockStatement> (location);
+            auto* block = new BlockStatement (location);
             block->statements.add (std::move (s));
             block->statements.add (parseVar());
-            return block.release();
+            return block;
         }
 
         match (TokenTypes::semicolon);
-        return s.release();
+        return s;
     }
 
     Statement* parseFunction()
@@ -1240,7 +1253,7 @@ private:
 
     Statement* parseForLoop()
     {
-        auto s = std::make_unique<LoopStatement> (location, false);
+        auto* s = new LoopStatement (location, false);
         match (TokenTypes::openParen);
         s->initialiser.reset (parseStatement());
 
@@ -1265,12 +1278,12 @@ private:
         }
 
         s->body.reset (parseStatement());
-        return s.release();
+        return s;
     }
 
     Statement* parseDoOrWhileLoop (bool isDoLoop)
     {
-        auto s = std::make_unique<LoopStatement> (location, isDoLoop);
+        auto* s = new LoopStatement (location, isDoLoop);
         s->initialiser.reset (new Statement (location));
         s->iterator.reset (new Statement (location));
 
@@ -1287,7 +1300,7 @@ private:
         if (! isDoLoop)
             s->body.reset (parseStatement());
 
-        return s.release();
+        return s;
     }
 
     Identifier parseIdentifier()
@@ -1315,18 +1328,17 @@ private:
 
     Expression* parseFunctionCall (FunctionCall* call, ExpPtr& function)
     {
-        std::unique_ptr<FunctionCall> s (call);
-        s->object.reset (function.release());
+        call->object.reset (function.release());
         match (TokenTypes::openParen);
 
         while (currentType != TokenTypes::closeParen)
         {
-            s->arguments.add (parseExpression());
+            call->arguments.add (parseExpression());
             if (currentType != TokenTypes::closeParen)
                 match (TokenTypes::comma);
         }
 
-        return matchCloseParen (s.release());
+        return matchCloseParen (call);
     }
 
     Expression* parseSuffixes (Expression* e)
@@ -1341,11 +1353,11 @@ private:
 
         if (matchIf (TokenTypes::openBracket))
         {
-            auto s = std::make_unique<ArraySubscript> (location);
+            auto* s = new ArraySubscript (location);
             s->object.reset (input.release());
             s->index.reset (parseExpression());
             match (TokenTypes::closeBracket);
-            return parseSuffixes (s.release());
+            return parseSuffixes (s);
         }
 
         if (matchIf (TokenTypes::plusplus))   return parsePostIncDec<AdditionOp> (input);
@@ -1422,19 +1434,20 @@ private:
 
         if (matchIf (TokenTypes::new_))
         {
-            ExpPtr name (new UnqualifiedName (location, parseIdentifier()));
+            const auto classId = parseIdentifier();
+            ExpPtr name (new UnqualifiedName (location, classId));
 
             while (matchIf (TokenTypes::dot))
                 name.reset (new DotOperator (location, name, parseIdentifier()));
 
-            return parseFunctionCall (new NewOperator (location), name);
+            return parseFunctionCall (new NewOperator (location, classId), name);
         }
 
-        throwError ("Found " + getTokenName (currentType) + " when expecting an expression");
+        throwError ("Found " + getTokenName (currentType) + " when expecting an expression.");
         return nullptr;
     }
 
-    template <typename OpType>
+    template<typename OpType>
     Expression* parsePreIncDec()
     {
         auto* e = parseFactor(); // careful - bare pointer is deliberately aliased
@@ -1442,7 +1455,7 @@ private:
         return new SelfAssignment (location, e, new OpType (location, lhs, one));
     }
 
-    template <typename OpType>
+    template<typename OpType>
     Expression* parsePostIncDec (ExpPtr& lhs)
     {
         auto* e = lhs.release(); // careful - bare pointer is deliberately aliased

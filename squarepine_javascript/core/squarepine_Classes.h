@@ -6,10 +6,20 @@
     static Identifier getClassName() { static const Identifier i (className); return i; }
 
 //==============================================================================
+inline bool isNumber (const String& s)
+{
+    CodeDocument cd;
+    cd.replaceAllContent (s);
+
+    CodeDocument::Iterator iter (cd);
+    return CppTokeniserFunctions::parseNumber (iter) != CPlusPlusCodeTokeniser::tokenType_error;
+}
+
+//==============================================================================
 /** A simple helper class to allow debugging and testing of
     copied and pasted Javascript code from official examples online.
 */
-struct ConsoleClass final : public DynamicObject
+struct ConsoleClass final : public JavascriptClass
 {
     ConsoleClass()
     {
@@ -30,13 +40,16 @@ struct ConsoleClass final : public DynamicObject
         Logger::writeToLog (result);
         return result;
     }
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ConsoleClass)
 };
 
 //==============================================================================
 /** Allows fetching an assortment of information about the JUCE framework
     we compiled with from within a Javascript script.
 */
-struct JUCEClass final : public DynamicObject
+struct JUCEClass final : public JavascriptClass
 {
     JUCEClass()
     {
@@ -62,13 +75,16 @@ struct JUCEClass final : public DynamicObject
     }
 
     SP_JS_IDENTIFY_CLASS ("JUCE")
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (JUCEClass)
 };
 
 //==============================================================================
 /**
     https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object
 */
-struct ObjectClass final : public DynamicObject
+struct ObjectClass final : public JavascriptClass
 {
     ObjectClass()
     {
@@ -114,13 +130,16 @@ struct ObjectClass final : public DynamicObject
     static var seal (Args a)                        { ignoreUnused (a); jassertfalse; return var(); } //TODO
     static var setProtypeOf (Args a)                { ignoreUnused (a); jassertfalse; return var(); } //TODO
     static var values (Args a)                      { ignoreUnused (a); jassertfalse; return var(); } //TODO
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ObjectClass)
 };
 
 //==============================================================================
 /*
     https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array
 */
-struct ArrayClass final : public DynamicObject
+struct ArrayClass final : public JavascriptClass
 {
     ArrayClass()
     {
@@ -613,13 +632,16 @@ struct ArrayClass final : public DynamicObject
 
         return var::undefined();
     }
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ArrayClass)
 };
 
 //==============================================================================
 /**
     https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String
 */
-struct StringClass final : public DynamicObject
+struct StringClass final : public JavascriptClass
 {
     StringClass()
     {
@@ -697,15 +719,19 @@ struct StringClass final : public DynamicObject
 
         return array;
     }
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StringClass)
 };
 
 //==============================================================================
 /**
     https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date
 */
-struct DateClass final : public DynamicObject
+struct DateClass final : public JavascriptClass
 {
-    DateClass()
+    DateClass (const Time& v = Time::getCurrentTime()) :
+        value (v)
     {
         #define DATE_CLASS_METHODS(X) \
             X (UTC) X (now) X (parse)
@@ -771,18 +797,57 @@ struct DateClass final : public DynamicObject
     static var toTimeString (Args a)        { ignoreUnused (a); jassertfalse; return var(); } //TODO
     static var toUTCString (Args a)         { ignoreUnused (a); jassertfalse; return var(); } //TODO
     static var valueOf (Args a)             { ignoreUnused (a); jassertfalse; return var(); } //TODO
+
+    static DateClass* construct (const Array<var>& vars)
+    {
+        if (vars.size() == 1)
+        {
+            const auto& v = vars.getReference (0);
+
+            if (v.isString())
+            {
+                const auto s = v.toString();
+                Time t;
+
+                if (RFC2422TimeParser::parseString (t, s).wasOk()
+                    || ISO8601TimeParser::parseString (t, s).wasOk())
+                    return new DateClass (t);
+            }
+
+            return nullptr;
+        }
+        else if (vars.size() > 1)
+        {
+        }
+
+        return new DateClass();
+    }
+
+    bool areSameValue (const var& v) override
+    {
+        if (auto* other = dynamic_cast<DateClass*> (v.getDynamicObject()))
+            return value == other->value;
+
+        return false;
+    }
+
+private:
+    Time value { Time::getCurrentTime() };
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DateClass)
 };
 
 //==============================================================================
-struct MathClass final : public DynamicObject
+struct MathClass final : public JavascriptClass
 {
-    MathClass()
+    MathClass() :
+        distribution (0.0, 1.0)
     {
         #define MATH_CLASS_METHODS(X) \
             X (abs) X (acos) X (acosh) X (asin) X (asinh) X (atan) X (atanh) X (atan2) \
             X (cbrt) X (ceil) X (cos) X (cosh) X (exp) X (expm1) X (floor) X (fround) X (hypot) \
             X (imul) X (log) X (log1p) X (log2) X (log10) X (max) X (min) X (pow) \
-            X (randInt) X (random) X (round) X (sign) X (sin) X (sinh) X (sqrt) \
+            X (randInt) X (round) X (sign) X (sin) X (sinh) X (sqrt) X (clz32) \
             X (tan) X (tanh) X (trunc) X (range) X (sqrt) X (toDegrees) X (toRadians)
 
         #define CREATE_MATH_METHOD(methodName) \
@@ -795,6 +860,7 @@ struct MathClass final : public DynamicObject
 
         const auto log2 = std::log (2.0);
         const auto log10 = std::log (2.0);
+        const auto loge = std::log (MathConstants<double>::euler);
 
         setProperty ("PI",      MathConstants<double>::pi);
         setProperty ("E",       MathConstants<double>::euler);
@@ -802,44 +868,53 @@ struct MathClass final : public DynamicObject
         setProperty ("SQRT1_2", std::sqrt (0.5));
         setProperty ("LN2",     log2);
         setProperty ("LN10",    log10);
-        setProperty ("LOG2E",   std::log (MathConstants<double>::euler) / log2);
-        setProperty ("LOG10E",  std::log (MathConstants<double>::euler) / log10);
+        setProperty ("LOG2E",   loge / log2);
+        setProperty ("LOG10E",  loge / log10);
+
+        randomEngine.seed (randomDevice());
+
+        setMethod ("random", [&] (Args) { return distribution (randomEngine); });
     }
 
     SP_JS_IDENTIFY_CLASS ("Math")
 
-    static var Math_abs       (Args a) { return isInt (a, 0) ? var (std::abs   (getInt (a, 0))) : var (std::abs   (getDouble (a, 0))); }
-    static var Math_acos      (Args a) { return std::acos  (getDouble (a, 0)); }
-    static var Math_asin      (Args a) { return std::asin  (getDouble (a, 0)); }
-    static var Math_atan      (Args a) { return std::atan  (getDouble (a, 0)); }
-    static var Math_atan2     (Args a) { return std::atan2 (getDouble (a, 0), getDouble (a, 1)); }
-    static var Math_cbrt      (Args a) { return std::cbrt  (getDouble (a, 0)); }
-    static var Math_ceil      (Args a) { return std::ceil  (getDouble (a, 0)); }
-    static var Math_cos       (Args a) { return std::cos   (getDouble (a, 0)); }
-    static var Math_cosh      (Args a) { return std::cosh  (getDouble (a, 0)); }
-    static var Math_exp       (Args a) { return std::exp   (getDouble (a, 0)); }
-    static var Math_expm1     (Args a) { return std::expm1 (getDouble (a, 0)); }
-    static var Math_floor     (Args a) { return std::floor (getDouble (a, 0)); }
-    static var Math_fround    (Args a) { return Math_round (a); }
-    static var Math_hypot     (Args a) { return std::hypot (getDouble (a, 0), getDouble (a, 1)); }
-    static var Math_imul      (Args a) { return getInt (a, 0) * getInt (a, 1); }
-    static var Math_log       (Args a) { return std::log   (getDouble (a, 0)); }
-    static var Math_log1p     (Args a) { return std::log1p (getDouble (a, 0)); }
-    static var Math_log2      (Args a) { return std::log2  (getDouble (a, 0)); }
-    static var Math_log10     (Args a) { return std::log10 (getDouble (a, 0)); }
-    static var Math_max       (Args a) { return (isInt (a, 0) && isInt (a, 1)) ? var (jmax (getInt (a, 0), getInt (a, 1))) : var (jmax (getDouble (a, 0), getDouble (a, 1))); }
-    static var Math_min       (Args a) { return (isInt (a, 0) && isInt (a, 1)) ? var (jmin (getInt (a, 0), getInt (a, 1))) : var (jmin (getDouble (a, 0), getDouble (a, 1))); }
-    static var Math_pow       (Args a) { return std::pow   (getDouble (a, 0), getDouble (a, 1)); }
-    static var Math_randInt   (Args a) { return a.numArguments < 2 ? var::undefined() : Random::getSystemRandom().nextInt (Range<int> (getInt (a, 0), getInt (a, 1))); }
-    static var Math_random    (Args)   { return Random::getSystemRandom().nextDouble(); }
-    static var Math_round     (Args a) { return isInt (a, 0) ? var (roundToInt (getInt (a, 0))) : var (roundToInt (getDouble (a, 0))); }
-    static var Math_sign      (Args a) { return isInt (a, 0) ? var (sign (getInt (a, 0))) : var (sign (getDouble (a, 0))); }
-    static var Math_sin       (Args a) { return std::sin   (getDouble (a, 0)); }
-    static var Math_sinh      (Args a) { return std::sinh  (getDouble (a, 0)); }
-    static var Math_sqrt      (Args a) { return std::sqrt  (getDouble (a, 0)); }
-    static var Math_tan       (Args a) { return std::tan   (getDouble (a, 0)); }
-    static var Math_tanh      (Args a) { return std::tanh  (getDouble (a, 0)); }
-    static var Math_trunc     (Args a) { return std::trunc (getDouble (a, 0)); }
+    std::random_device randomDevice;
+    std::default_random_engine randomEngine;
+    std::uniform_real_distribution<double> distribution;
+
+    static var Math_abs     (Args a) { return isInt (a, 0) ? var (std::abs   (getInt (a, 0))) : var (std::abs   (getDouble (a, 0))); }
+    static var Math_acos    (Args a) { return std::acos  (getDouble (a, 0)); }
+    static var Math_asin    (Args a) { return std::asin  (getDouble (a, 0)); }
+    static var Math_atan    (Args a) { return std::atan  (getDouble (a, 0)); }
+    static var Math_atan2   (Args a) { return std::atan2 (getDouble (a, 0), getDouble (a, 1)); }
+    static var Math_cbrt    (Args a) { return std::cbrt  (getDouble (a, 0)); }
+    static var Math_ceil    (Args a) { return std::ceil  (getDouble (a, 0)); }
+    static var Math_cos     (Args a) { return std::cos   (getDouble (a, 0)); }
+    static var Math_cosh    (Args a) { return std::cosh  (getDouble (a, 0)); }
+    static var Math_exp     (Args a) { return std::exp   (getDouble (a, 0)); }
+    static var Math_expm1   (Args a) { return std::expm1 (getDouble (a, 0)); }
+    static var Math_floor   (Args a) { return std::floor (getDouble (a, 0)); }
+    static var Math_fround  (Args a) { return Math_round (a); }
+    static var Math_imul    (Args a) { return getInt (a, 0) * getInt (a, 1); }
+    static var Math_log     (Args a) { return std::log   (getDouble (a, 0)); }
+    static var Math_log1p   (Args a) { return std::log1p (getDouble (a, 0)); }
+    static var Math_log2    (Args a) { return std::log2  (getDouble (a, 0)); }
+    static var Math_log10   (Args a) { return std::log10 (getDouble (a, 0)); }
+    static var Math_max     (Args a) { return (isInt (a, 0) && isInt (a, 1)) ? var (jmax (getInt (a, 0), getInt (a, 1))) : var (jmax (getDouble (a, 0), getDouble (a, 1))); }
+    static var Math_min     (Args a) { return (isInt (a, 0) && isInt (a, 1)) ? var (jmin (getInt (a, 0), getInt (a, 1))) : var (jmin (getDouble (a, 0), getDouble (a, 1))); }
+    static var Math_pow     (Args a) { return std::pow   (getDouble (a, 0), getDouble (a, 1)); }
+    static var Math_randInt (Args a) { return a.numArguments < 2 ? var::undefined() : Random::getSystemRandom().nextInt (Range<int> (getInt (a, 0), getInt (a, 1))); }
+    static var Math_round   (Args a) { return isInt (a, 0) ? var (roundToInt (getInt (a, 0))) : var (roundToInt (getDouble (a, 0))); }
+    static var Math_sign    (Args a) { return isInt (a, 0) ? var (sign (getInt (a, 0))) : var (sign (getDouble (a, 0))); }
+    static var Math_sin     (Args a) { return std::sin   (getDouble (a, 0)); }
+    static var Math_sinh    (Args a) { return std::sinh  (getDouble (a, 0)); }
+    static var Math_sqrt    (Args a) { return std::sqrt  (getDouble (a, 0)); }
+    static var Math_tan     (Args a) { return std::tan   (getDouble (a, 0)); }
+    static var Math_tanh    (Args a) { return std::tanh  (getDouble (a, 0)); }
+    static var Math_trunc   (Args a) { return std::trunc (getDouble (a, 0)); }
+    static var Math_asinh   (Args a) { return std::asinh (getDouble (a, 0)); }
+    static var Math_acosh   (Args a) { return std::acosh (getDouble (a, 0)); }
+    static var Math_atanh   (Args a) { return std::atanh (getDouble (a, 0)); }
 
     //NB: These are non-standard.
     static var Math_range     (Args a) { return isInt (a, 0) ? var (jlimit (getInt (a, 1), getInt (a, 2), getInt (a, 0))) : var (jlimit (getDouble (a, 1), getDouble (a, 2), getDouble (a, 0))); }
@@ -847,29 +922,83 @@ struct MathClass final : public DynamicObject
     static var Math_toDegrees (Args a) { return radiansToDegrees (getDouble (a, 0)); }
     static var Math_toRadians (Args a) { return degreesToRadians (getDouble (a, 0)); }
 
-    static var Math_clz32 (Args a)
-    {
-        if (isInt (a, 0))
-            return 32 - BigInteger (std::abs (getInt (a, 0))).countNumberOfSetBits();
+    /** @returns the square root of the sum of squares of the given arguments.
+        If at least one of the arguments cannot be converted to a number, NaN is returned.
 
-        return 0;
+        @see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/hypot
+    */
+    static var Math_hypot (Args a)
+    {
+        if (a.numArguments <= 0)
+            return 0;
+
+        double value = 0.0;
+
+        for (int i = 0; i < a.numArguments; ++i)
+        {
+            const auto& v = a.arguments[i];
+            if (! v.isInt() || ! v.isInt64() || ! v.isDouble())
+                return std::numeric_limits<double>::quiet_NaN();
+
+            value += square (static_cast<double> (a.arguments[i]));
+        }
+
+        return std::sqrt (value);
     }
 
-    // We can't use the std namespace equivalents of these functions without breaking
-    // compatibility with older versions of OS X.
-    static var Math_asinh     (Args a) { return asinh (getDouble (a, 0)); }
-    static var Math_acosh     (Args a) { return acosh (getDouble (a, 0)); }
-    static var Math_atanh     (Args a) { return atanh (getDouble (a, 0)); }
+    static int countLeadingZeros (int x) noexcept
+    {
+        if (x <= 0)
+            return 0;
+
+        //do the smearing
+        x |= x >> 1; 
+        x |= x >> 2;
+        x |= x >> 4;
+        x |= x >> 8;
+        x |= x >> 16;
+
+        //count the ones
+        x -= x >> 1 & 0x55555555;
+        x = (x >> 2 & 0x33333333) + (x & 0x33333333);
+        x = (x >> 4) + x & 0x0f0f0f0f;
+        x += x >> 8;
+        x += x >> 16;
+
+        return (sizeof (int) * 8) - (x & 0x0000003f); //subtract # of 1s from 32
+    }
+
+    /** @returns the number of leading zero bits in the 32-bit binary representation of a number.
+        @see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/clz32
+    */
+    static var Math_clz32 (Args a)
+    {
+        if (a.numArguments == 1)
+        {
+            const auto& v = a.arguments[0];
+
+            if (v.isInt())
+                return countLeadingZeros (static_cast<int> (v));
+
+            return countLeadingZeros (static_cast<int> (static_cast<int64> (v)));
+        }
+
+        jassertfalse; // wtf?
+        return var::undefined();
+    }
 
     template<typename Type>
     static constexpr Type sign (Type n) noexcept 
     {
         return n > 0 ? (Type) 1 : (n < 0 ? (Type) -1 : 0);
     }
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MathClass)
 };
 
 //==============================================================================
-struct JSONClass final : public DynamicObject
+struct JSONClass final : public JavascriptClass
 {
     JSONClass()
     {
@@ -881,13 +1010,16 @@ struct JSONClass final : public DynamicObject
 
     static var parse (Args a)       { return JSON::parse (get (a, 0)); }
     static var stringify (Args a)   { return JSON::toString (get (a, 0)); }
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (JSONClass)
 };
 
 //==============================================================================
 /**
     https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol
 */
-struct SymbolClass final : public DynamicObject
+struct SymbolClass final : public JavascriptClass
 {
     SymbolClass()
     {
@@ -911,13 +1043,16 @@ struct SymbolClass final : public DynamicObject
     static var toPrimitive (Args a)         { ignoreUnused (a); jassertfalse; return var(); } //TODO
     static var toStringTag (Args a)         { ignoreUnused (a); jassertfalse; return var(); } //TODO
     static var unscopables (Args a)         { ignoreUnused (a); jassertfalse; return var(); } //TODO
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SymbolClass)
 };
 
 //==============================================================================
 /**
     https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp
 */
-struct RegExpClass final : public DynamicObject
+struct RegExpClass final : public JavascriptClass
 {
     RegExpClass()
     {
@@ -930,23 +1065,27 @@ struct RegExpClass final : public DynamicObject
     static var test (Args a)        { ignoreUnused (a); jassertfalse; return var(); } //TODO
     static var toSource (Args a)    { ignoreUnused (a); jassertfalse; return var(); } //TODO
     static var toString (Args a)    { ignoreUnused (a); jassertfalse; return var(); } //TODO
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RegExpClass)
 };
 
 //==============================================================================
 /**
     https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Numbers_and_dates
-    Demo.print (Number.EPSILON);
-    Demo.print (Number.NaN);
-    Demo.print (Number.NEGATIVE_INFINITY);
-    Demo.print (Number.POSITIVE_INFINITY);
-    Demo.print (Number.MIN_SAFE_INTEGER);
-    Demo.print (Number.MAX_SAFE_INTEGER);
-    Demo.print (Number.MIN_VALUE);
-    Demo.print (Number.MAX_VALUE);
+    console.log (Number.EPSILON);
+    console.log (Number.NaN);
+    console.log (Number.NEGATIVE_INFINITY);
+    console.log (Number.POSITIVE_INFINITY);
+    console.log (Number.MIN_SAFE_INTEGER);
+    console.log (Number.MAX_SAFE_INTEGER);
+    console.log (Number.MIN_VALUE);
+    console.log (Number.MAX_VALUE);
 */
-struct NumberClass final : public DynamicObject
+struct NumberClass final : public JavascriptClass
 {
-    NumberClass()
+    NumberClass (double initialValue = 0.0) :
+        value (initialValue)
     {
         setMethod ("parseInt",              parseInt);
         setMethod ("parseFloat",            parseFloat);
@@ -963,6 +1102,8 @@ struct NumberClass final : public DynamicObject
         setProperty ("MAX_SAFE_INTEGER",    std::numeric_limits<int64>::max());
         setProperty ("MIN_VALUE",           std::numeric_limits<double>::min());
         setProperty ("MAX_VALUE",           std::numeric_limits<double>::max());
+
+        setMethod ("toString",             [&] (Args) { return var (value).toString(); });
     }
 
     SP_JS_IDENTIFY_CLASS ("Number")
@@ -972,77 +1113,184 @@ struct NumberClass final : public DynamicObject
         auto s = getString (a, 0).trim();
 
         return s[0] == '0' ? (s[1] == 'x' ? s.substring (2).getHexValue64() : getOctalValue (s))
-                            : s.getLargeIntValue();
+                           : s.getLargeIntValue();
     }
 
     static var parseFloat (Args a)      { return getDouble (a, 0); }
     static var isNaN (Args a)           { return std::isnan (getDouble (a, 0)); }
     static var isFinite (Args a)        { return std::isfinite (getDouble (a, 0)); }
+
+    void writeAsJSON (OutputStream& out, int, bool, int) override { out << value; }
+
+    static NumberClass* construct (const Array<var>& vars)
+    {
+        auto* nc = new NumberClass();
+
+        if (vars.size() >= 1)
+        {
+            const auto& v = vars.getReference (0);
+
+            if (v.isString())
+            {
+                const auto s = v.toString();
+                if (isNumber (s))
+                    nc->value = s.getDoubleValue();
+                else
+                    nc->value = std::numeric_limits<double>::quiet_NaN();
+            }
+            else if (v.isInt())     { nc->value = (double) static_cast<int> (v); }
+            else if (v.isInt64())   { nc->value = (double) static_cast<int64> (v); }
+            else if (v.isDouble())  { nc->value = static_cast<double> (v); }
+            else                    { nc->value = std::numeric_limits<double>::quiet_NaN(); }
+        }
+
+        return nc;
+    }
+
+    bool areSameValue (const var& v) override
+    {
+        if (v.isInt())          { return value == (double) static_cast<int> (v); }
+        else if (v.isInt64())   { return value == (double) static_cast<int64> (v); }
+        else if (v.isDouble())  { return value == static_cast<double> (v); }
+        else if (v.isString())
+        {
+            const auto s = v.toString();
+            if (isNumber (s))
+                return value == s.getDoubleValue();
+
+            return false;
+        }
+
+        if (auto* other = dynamic_cast<NumberClass*> (v.getDynamicObject()))
+            return value == other->value;
+
+        return false;
+    }
+
+private:
+    double value = 0.0;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NumberClass)
 };
 
 //==============================================================================
 /**
     https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Boolean
 */
-struct BooleanClass final : public DynamicObject
+struct BooleanClass final : public JavascriptClass
 {
-    BooleanClass()
+    BooleanClass (bool initialValue = false) :
+        value (initialValue)
     {
+        setMethod ("toString",  [&] (Args) { return toString(); });
+        setMethod ("valueOf",   [&] (Args) { return toString(); });
+    }
+
+    static BooleanClass* construct (const Array<var>& vars)
+    {
+        auto* bc = new BooleanClass();
+
+        for (const auto& v : vars)
+        {
+            if (v.isBool())         { bc->value |= static_cast<bool> (v); }
+            else if (v.isInt())     { bc->value |= static_cast<int> (v) != 0; }
+            else if (v.isInt64())   { bc->value |= static_cast<int64> (v) != 0; }
+            else if (v.isDouble())  { bc->value |= static_cast<double> (v) != 0.0; }
+            else if (v.isString())  { bc->value |= v.toString().isNotEmpty(); }
+            else                    { bc->value = true; break; }
+        }
+
+        return bc;
     }
 
     SP_JS_IDENTIFY_CLASS ("Boolean")
+
+    String toString() const { return value ? "true" : "false"; }
+
+    void writeAsJSON (OutputStream& out, int, bool, int) override { out << toString(); }
+
+    bool areSameValue (const var& v) override
+    {
+        if (v.isBool())         { return value == static_cast<bool> (v); }
+        else if (v.isInt())     { return value == (static_cast<int> (v) != 0); }
+        else if (v.isInt64())   { return value == (static_cast<int64> (v) != 0); }
+        else if (v.isDouble())  { return value == (static_cast<double> (v) != 0.0); }
+        else if (v.isString())  { return value == v.toString().equalsIgnoreCase ("true"); }
+
+        if (auto* other = dynamic_cast<BooleanClass*> (v.getDynamicObject()))
+            return value == other->value;
+
+        return false;
+    }
+
+private:
+    bool value = false;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BooleanClass)
 };
 
 //==============================================================================
 /**
     https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/BigInt
 */
-struct BigIntClass final : public DynamicObject
+struct BigIntClass final : public JavascriptClass
 {
     BigIntClass()
     {
     }
 
     SP_JS_IDENTIFY_CLASS ("BigInt")
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BigIntClass)
 };
 
 //==============================================================================
 /**
     https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect
 */
-struct ReflectClass final : public DynamicObject
+struct ReflectClass final : public JavascriptClass
 {
     ReflectClass()
     {
     }
 
     SP_JS_IDENTIFY_CLASS ("Reflect")
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ReflectClass)
 };
 
 //==============================================================================
 /**
     https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy
 */
-struct ProxyClass final : public DynamicObject
+struct ProxyClass final : public JavascriptClass
 {
     ProxyClass()
     {
     }
 
     SP_JS_IDENTIFY_CLASS ("Proxy")
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ProxyClass)
 };
 
 //==============================================================================
 /**
     https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics
 */
-struct AtomicsClass final : public DynamicObject
+struct AtomicsClass final : public JavascriptClass
 {
     AtomicsClass()
     {
     }
 
     SP_JS_IDENTIFY_CLASS ("Atomics")
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AtomicsClass)
 };
 
 //==============================================================================
@@ -1050,7 +1298,7 @@ struct AtomicsClass final : public DynamicObject
     https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Boolean
     https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map
 */
-struct MapClass final : public DynamicObject
+struct MapClass final : public JavascriptClass
 {
     MapClass()
     {
@@ -1084,13 +1332,16 @@ struct MapClass final : public DynamicObject
     {
         ignoreUnused (a); jassertfalse; return var();
     }
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MapClass)
 };
 
 //==============================================================================
 /**
     https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set
 */
-struct SetClass final : public DynamicObject
+struct SetClass final : public JavascriptClass
 {
     SetClass()
     {
@@ -1121,13 +1372,16 @@ struct SetClass final : public DynamicObject
     {
         ignoreUnused (a); jassertfalse; return var();
     }
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SetClass)
 };
 
 //==============================================================================
 /**
     https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakMap
 */
-struct WeakMapClass final : public DynamicObject
+struct WeakMapClass final : public JavascriptClass
 {
     WeakMapClass()
     {
@@ -1150,13 +1404,16 @@ struct WeakMapClass final : public DynamicObject
     static var WeakMap_get (Args a)     { ignoreUnused (a); jassertfalse; return var(); } //TODO
     static var WeakMap_has (Args a)     { ignoreUnused (a); jassertfalse; return var(); } //TODO
     static var WeakMap_set (Args a)     { ignoreUnused (a); jassertfalse; return var(); } //TODO
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (WeakMapClass)
 };
 
 //==============================================================================
 /**
     https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakSet
 */
-struct WeakSetClass final : public DynamicObject
+struct WeakSetClass final : public JavascriptClass
 {
     WeakSetClass()
     {
@@ -1178,13 +1435,16 @@ struct WeakSetClass final : public DynamicObject
     static var WeakSet_clear (Args a)   { ignoreUnused (a); jassertfalse; return var(); } //TODO
     static var WeakSet_delete (Args a)  { ignoreUnused (a); jassertfalse; return var(); } //TODO
     static var WeakSet_has (Args a)     { ignoreUnused (a); jassertfalse; return var(); } //TODO
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (WeakSetClass)
 };
 
 //==============================================================================
 /**
     https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer
 */
-struct ArrayBufferClass final : public DynamicObject
+struct ArrayBufferClass final : public JavascriptClass
 {
     ArrayBufferClass()
     {
@@ -1205,13 +1465,16 @@ struct ArrayBufferClass final : public DynamicObject
     static var isView (Args a)      { ignoreUnused (a); jassertfalse; return var(); } //TODO
     static var slice (Args a)       { ignoreUnused (a); jassertfalse; return var(); } //TODO
     static var transfer (Args a)    { ignoreUnused (a); jassertfalse; return var(); } //TODO
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ArrayBufferClass)
 };
 
 //==============================================================================
 /**
     https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView
 */
-struct DataViewClass final : public DynamicObject
+struct DataViewClass final : public JavascriptClass
 {
     DataViewClass()
     {
@@ -1248,13 +1511,16 @@ struct DataViewClass final : public DynamicObject
     static var setUint8 (Args a)    { ignoreUnused (a); jassertfalse; return var(); } //TODO
     static var setUint16 (Args a)   { ignoreUnused (a); jassertfalse; return var(); } //TODO
     static var setUint32 (Args a)   { ignoreUnused (a); jassertfalse; return var(); } //TODO
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DataViewClass)
 };
 //==============================================================================
 
 /**
     https://developer.mozilla.org/en-US/docs/Web/API/XMLHttpRequest/Using_XMLHttpRequest
 */
-struct XMLHttpRequestClass final : public DynamicObject
+struct XMLHttpRequestClass final : public JavascriptClass
 {
     XMLHttpRequestClass()
     {
@@ -1270,6 +1536,9 @@ struct XMLHttpRequestClass final : public DynamicObject
     }
 
     SP_JS_IDENTIFY_CLASS ("XMLHttpRequest")
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (XMLHttpRequestClass)
 };
 
 //==============================================================================
@@ -1309,3 +1578,65 @@ var Scope::findFunctionCall (const CodeLocation& location, const var& targetObje
 }
 
 //==============================================================================
+var NewOperator::getResult (const Scope& s) const
+{
+    const auto classOrFunc = object->getResult (s);
+    const bool isFunc = isFunction (classOrFunc);
+
+    if (! (isFunc || classOrFunc.getDynamicObject() != nullptr))
+        return var::undefined();
+
+    if (isFunc)
+    {
+        auto* newObject = new DynamicObject();
+        invokeFunction (s, classOrFunc, newObject);
+        return newObject;
+    }
+
+    if (classId.isValid())
+    {
+        Array<var> argVars;
+
+        for (auto* a : arguments)
+            argVars.add (a->getResult (s));
+
+        if (classId == JSONClass::getClassName()
+            || classId == MathClass::getClassName())
+        {
+            location.throwError (String ("XYZ is not constructable!")
+                                    .replace ("XYZ", classId.getCharPointer(), true));
+            return var::undefined();
+        }
+
+        DynamicObject* newObject = nullptr;
+
+        if (classId == BooleanClass::getClassName())
+        {
+            newObject = BooleanClass::construct (argVars);
+        }
+        else if (classId == NumberClass::getClassName())
+        {
+            newObject = NumberClass::construct (argVars);
+        }
+        else if (classId == DateClass::getClassName())
+        {
+            newObject = DateClass::construct (argVars);
+        }
+        else
+        {
+            newObject = new DynamicObject();
+            jassertfalse; // No idea what kind of class this is supposed to be! @todo perhaps?
+        }
+
+        if (newObject != nullptr)
+        {
+            newObject->setProperty (getPrototypeIdentifier(), classOrFunc);
+            return newObject;
+        }
+
+        location.throwError (String ("Failed to create class of type: \"XYZ\".")
+                                .replace ("XYZ", classId.getCharPointer(), true));
+    }
+
+    return var::undefined();
+}

@@ -4,6 +4,7 @@ namespace sp
 {
     using namespace juce;
 
+    #include "core/squarepine_RFC2822Time.cpp"
     #include "core/squarepine_Parsing.h"
     #include "core/squarepine_Classes.h"
     #include "core/squarepine_RootObject.cpp"

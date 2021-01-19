@@ -1,12 +1,25 @@
+//==============================================================================
+/** */
+class JavascriptClass : public DynamicObject
+{
+public:
+    /** */
+    JavascriptClass() = default;
+
+    /** Basically operator===() for JS. */
+    virtual bool areSameValue (const var&) { return false; }
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (JavascriptClass)
+};
+
+//==============================================================================
 /** */
 class RootObject final : public DynamicObject
 {
 public:
     /** */
     RootObject();
-
-    /** */
-    ~RootObject() override;
 
     //==============================================================================
     /** */

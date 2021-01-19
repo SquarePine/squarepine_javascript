@@ -18,6 +18,10 @@
 
 //==============================================================================
 #include <regex>
+#include <random>
+#include <sstream>
+#include <locale>
+#include <iomanip>
 
 #include <juce_data_structures/juce_data_structures.h>
 
@@ -29,6 +33,10 @@
 namespace sp
 {
     using namespace juce;
+
+    #include "core/squarepine_RFC2822Time.h"
+    //#include "core/squarepine_AST.h"
+    //#include "core/squarepine_Lexer.h"
 
     #include "core/squarepine_RootObject.h"
     #include "core/squarepine_JavascriptEngine.h"

@@ -14,12 +14,12 @@ namespace JsTokeniserFunctions
     enum
     {
         smallestKeywordSize = 2,
-        largestKeywordSize = 12     //"synchronized" is presently the longest keyword.
+        largestKeywordSize = 13     //"XMLHttpRequest" is presently the longest keyword.
     };
 
     using CharPointerType = String::CharPointerType;
 
-    inline bool isReservedKeyword (const CharPointerType& token, int tokenLength) noexcept
+    inline int isReservedKeyword (const CharPointerType& token, int tokenLength) noexcept
     {
         if (tokenLength < smallestKeywordSize || tokenLength > largestKeywordSize)
             return false;
@@ -28,7 +28,7 @@ namespace JsTokeniserFunctions
         #undef SP_CHECK_IF_TOKEN_MATCHES
         #define SP_CHECK_IF_TOKEN_MATCHES(name, str) \
             if (CharacterFunctions::compare (token, CharPointer_ASCII (str)) == 0) \
-                return true;
+                return JavascriptTokeniser::tokenType_keyword;
 
         SP_JS_KEYWORDS (SP_CHECK_IF_TOKEN_MATCHES)
         #undef SP_CHECK_IF_TOKEN_MATCHES
@@ -38,7 +38,7 @@ namespace JsTokeniserFunctions
         #undef SP_CHECK_IF_TOKEN_MATCHES
         #define SP_CHECK_IF_TOKEN_MATCHES(JSClass) \
             if (CharacterFunctions::compare (token, JSClass::getClassName().getCharPointer()) == 0) \
-                return true;
+                return JavascriptTokeniser::tokenType_internalClass;
 
         #define SP_LIST_OF_JS_CLASSES(X) \
             X (ArrayBufferClass)    X (ArrayClass)      X (AtomicsClass)    X (BigIntClass)     X (BooleanClass) \
@@ -50,7 +50,7 @@ namespace JsTokeniserFunctions
         #undef SP_LIST_OF_JS_CLASSES
         #undef SP_CHECK_IF_TOKEN_MATCHES
 
-        return false;
+        return -1;
     }
 
     template<typename Iterator>
@@ -72,8 +72,10 @@ namespace JsTokeniserFunctions
         {
             possible.writeNull();
 
-            if (isReservedKeyword (CharPointerType (possibleIdentifier), tokenLength))
-                return JavascriptTokeniser::tokenType_keyword;
+            const auto type = isReservedKeyword (CharPointerType (possibleIdentifier), tokenLength);
+
+            if (type >= 0)
+                return type;
         }
 
         return JavascriptTokeniser::tokenType_identifier;
@@ -88,6 +90,7 @@ CodeEditorComponent::ColourScheme JavascriptTokeniser::getDefaultEditorColourSch
         { "Error",          Colours::red },
         { "Comment",        Colours::green },
         { "Keyword",        Colours::blue },
+        { "InternalClass",  Colours::blue.withAlpha (0.9f) },
         { "Operator",       Colours::grey },
         { "Identifier",     Colours::black },
         { "Integer",        Colours::darkgrey },

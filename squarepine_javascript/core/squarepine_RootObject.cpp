@@ -25,16 +25,17 @@ RootObject::RootObject()
     //@todo https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/globalThis
     setProperty ("globalThis",          this);                      
 
+    registerNativeObject<ConsoleClass>();           // NB: Non-standard.
+    registerNativeObject<JUCEClass>();              // NB: Non-standard.
+
     registerNativeObject<ArrayBufferClass>();
     registerNativeObject<ArrayClass>();
     registerNativeObject<AtomicsClass>();
     registerNativeObject<BooleanClass>();
     registerNativeObject<BigIntClass>();
-    registerNativeObject<ConsoleClass>();           // NB: Non-standard.
     registerNativeObject<DataViewClass>();
     registerNativeObject<DateClass>();
     registerNativeObject<JSONClass>();
-    registerNativeObject<JUCEClass>();              // NB: Non-standard.
     registerNativeObject<MapClass>();
     registerNativeObject<MathClass>();
     registerNativeObject<NumberClass>();
@@ -48,10 +49,6 @@ RootObject::RootObject()
     registerNativeObject<WeakMapClass>();
     registerNativeObject<WeakSetClass>();
     registerNativeObject<XMLHttpRequestClass>();
-}
-
-RootObject::~RootObject()
-{
 }
 
 //==============================================================================

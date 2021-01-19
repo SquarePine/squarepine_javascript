@@ -24,6 +24,7 @@ public:
         tokenType_error = 0,
         tokenType_comment,
         tokenType_keyword,
+        tokenType_internalClass,
         tokenType_operator,
         tokenType_identifier,
         tokenType_integer,
