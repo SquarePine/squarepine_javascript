@@ -67,7 +67,7 @@ struct JUCEClass final : public JavascriptClass
             X (getMemorySizeInMegabytes)    X (getPageSize)             X (getStackBacktrace)       X (isRunningInAppExtensionSandbox)
 
         #define CREATE_JUCE_CLASS_METHOD(methodName) \
-                setMethod (JUCE_STRINGIFY (methodName), [](Args) { return SystemStats:: ## methodName ## (); });
+                setMethod (#methodName, [](Args) { return SystemStats:: methodName (); });
 
         JUCE_CLASS_METHODS (CREATE_JUCE_CLASS_METHOD)
 
