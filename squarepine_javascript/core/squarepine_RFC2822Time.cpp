@@ -23,8 +23,7 @@ static int parseFixedSizeIntAndSkip (String::CharPointerType& t, int numChars, c
 //==============================================================================
 Result RFC2422TimeParser::parseString (Time& result, StringRef timeString)
 {
-    auto t = timeString.text;
-
+    ignoreUnused (timeString);
     result = Time();
     return Result::ok();
 }

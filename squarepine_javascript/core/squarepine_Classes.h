@@ -838,6 +838,36 @@ private:
 };
 
 //==============================================================================
+static inline int countLeadingZeros (int x) noexcept
+{
+    if (x <= 0)
+        return 0;
+
+    //do the smearing
+    x |= x >> 1; 
+    x |= x >> 2;
+    x |= x >> 4;
+    x |= x >> 8;
+    x |= x >> 16;
+
+    //count the ones
+    x -= x >> 1 & 0x55555555;
+    x = (x >> 2 & 0x33333333) + (x & 0x33333333);
+    x = (x >> 4) + x & 0x0f0f0f0f;
+    x += x >> 8;
+    x += x >> 16;
+
+    return (sizeof (int) * 8) - (x & 0x0000003f); //subtract # of 1s from 32
+}
+
+template<typename Type>
+static inline Type sign (Type n) noexcept 
+{
+    return n > (Type) 0
+        ? (Type) 1
+        : (n < (Type) 0 ? (Type) -1 : (Type) 0);
+}
+
 struct MathClass final : public JavascriptClass
 {
     MathClass() :
@@ -903,7 +933,6 @@ struct MathClass final : public JavascriptClass
     static var Math_max     (Args a) { return (isInt (a, 0) && isInt (a, 1)) ? var (jmax (getInt (a, 0), getInt (a, 1))) : var (jmax (getDouble (a, 0), getDouble (a, 1))); }
     static var Math_min     (Args a) { return (isInt (a, 0) && isInt (a, 1)) ? var (jmin (getInt (a, 0), getInt (a, 1))) : var (jmin (getDouble (a, 0), getDouble (a, 1))); }
     static var Math_pow     (Args a) { return std::pow   (getDouble (a, 0), getDouble (a, 1)); }
-    static var Math_randInt (Args a) { return a.numArguments < 2 ? var::undefined() : Random::getSystemRandom().nextInt (Range<int> (getInt (a, 0), getInt (a, 1))); }
     static var Math_round   (Args a) { return isInt (a, 0) ? var (roundToInt (getInt (a, 0))) : var (roundToInt (getDouble (a, 0))); }
     static var Math_sign    (Args a) { return isInt (a, 0) ? var (sign (getInt (a, 0))) : var (sign (getDouble (a, 0))); }
     static var Math_sin     (Args a) { return std::sin   (getDouble (a, 0)); }
@@ -915,6 +944,14 @@ struct MathClass final : public JavascriptClass
     static var Math_asinh   (Args a) { return std::asinh (getDouble (a, 0)); }
     static var Math_acosh   (Args a) { return std::acosh (getDouble (a, 0)); }
     static var Math_atanh   (Args a) { return std::atanh (getDouble (a, 0)); }
+
+    static var Math_randInt (Args a)
+    {
+        if (a.numArguments < 2)
+            return var::undefined();
+
+        return Random::getSystemRandom().nextInt (Range<int> (getInt (a, 0), getInt (a, 1)));
+    }
 
     //NB: These are non-standard.
     static var Math_range     (Args a) { return isInt (a, 0) ? var (jlimit (getInt (a, 1), getInt (a, 2), getInt (a, 0))) : var (jlimit (getDouble (a, 1), getDouble (a, 2), getDouble (a, 0))); }
@@ -946,32 +983,10 @@ struct MathClass final : public JavascriptClass
         return std::sqrt (value);
     }
 
-    static int countLeadingZeros (int x) noexcept
-    {
-        if (x <= 0)
-            return 0;
-
-        //do the smearing
-        x |= x >> 1; 
-        x |= x >> 2;
-        x |= x >> 4;
-        x |= x >> 8;
-        x |= x >> 16;
-
-        //count the ones
-        x -= x >> 1 & 0x55555555;
-        x = (x >> 2 & 0x33333333) + (x & 0x33333333);
-        x = (x >> 4) + x & 0x0f0f0f0f;
-        x += x >> 8;
-        x += x >> 16;
-
-        return (sizeof (int) * 8) - (x & 0x0000003f); //subtract # of 1s from 32
-    }
-
     /** @returns the number of leading zero bits in the 32-bit binary representation of a number.
         @see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/clz32
     */
-    static var Math_clz32 (Args a)
+    static inline var Math_clz32 (Args a)
     {
         if (a.numArguments == 1)
         {
@@ -985,12 +1000,6 @@ struct MathClass final : public JavascriptClass
 
         jassertfalse; // wtf?
         return var::undefined();
-    }
-
-    template<typename Type>
-    static constexpr Type sign (Type n) noexcept 
-    {
-        return n > 0 ? (Type) 1 : (n < 0 ? (Type) -1 : 0);
     }
 
 private:

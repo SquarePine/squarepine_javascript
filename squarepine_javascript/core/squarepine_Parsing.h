@@ -164,10 +164,7 @@ static var setTimeout (Args a)
 //==============================================================================
 struct CodeLocation final
 {
-    CodeLocation() = default;
-    ~CodeLocation() = default;
-
-    CodeLocation (const String& code) noexcept :
+    CodeLocation (const String& code = String()) noexcept :
         program (code),
         location (program.getCharPointer())
     {
@@ -184,6 +181,8 @@ struct CodeLocation final
         location (std::move (other.location))
     {
     }
+
+    ~CodeLocation() = default;
 
     CodeLocation& operator= (const CodeLocation& other) noexcept
     {
